@@ -1,0 +1,121 @@
+name: Build and publish container image
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      git_ref:
+        description: 'Git ref to build (branch, tag, or commit SHA)'
+        required: true
+        default: 'main'
+        type: string
+      image_tag:
+        description: 'Custom image tag (optional, defaults to ref name)'
+        required: false
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      # GHCR doesn't accept uppercase characters in repository path, below enables easier forking
+      - name: "Build lowercase version of full image name"
+        id: "registry_builder"
+        run: >
+          echo "image_name=${REGISTRY}/${{ github.repository }}"
+          | tr '[[:upper:]]' '[[:lower:]]' >> "${GITHUB_OUTPUT}"
+
+      - name: Checkout repository
+        # Pinned version: https://github.com/actions/checkout/releases/tag/v6.0.2
+        uses: "actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd"
+        with:
+          ref: ${{ github.event.inputs.git_ref || github.ref }}
+
+      - name: Set up QEMU
+        # Pinned version: https://github.com/docker/setup-qemu-action/releases/tag/v4.0.0
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a
+
+      - name: Set up Docker Buildx
+        # Pinned version: https://github.com/docker/setup-buildx-action/releases/tag/v4.0.0
+        uses: "docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd"
+
+      - name: Log in to Container Registry
+        if: github.event_name != 'pull_request'
+        # Pinned version:  https://github.com/docker/login-action/releases/tag/v4.0.0
+        uses: "docker/login-action@65b78e6e13532edd9afa3aa52ac7964289d1a9c1"
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine image tags
+        id: tags
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            REF="${{ github.event.inputs.git_ref }}"
+            CUSTOM_TAG="${{ github.event.inputs.image_tag }}"
+            if [ -n "$CUSTOM_TAG" ]; then
+              echo "tags=${{ steps.registry_builder.outputs.image_name }}:${CUSTOM_TAG}" >> \
+                $GITHUB_OUTPUT
+            else
+              # Sanitize ref name for use as docker tag:
+              # - Strip common Git ref prefixes
+              # - Convert to lowercase
+              # - Replace invalid characters with '-'
+              # - Normalize separators and trim edges
+              # - Enforce Docker's 128-character tag limit
+              SAFE_REF=$(echo "$REF" \
+                | sed 's#^refs/heads/##; s#^refs/tags/##' \
+                | tr '[:upper:]' '[:lower:]' \
+                | sed 's/[^a-z0-9._-]/-/g' \
+                | sed 's/[-._]\{2,\}/-/g' \
+                | sed 's/^[-._]\+//; s/[-._]\+$//' \
+                | cut -c1-128 \
+              )
+              echo "tags=${{ steps.registry_builder.outputs.image_name }}:${SAFE_REF}" \
+                >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        if: github.event_name != 'workflow_dispatch'
+        # Pinned version: https://github.com/docker/metadata-action/releases/tag/v6.0.0
+        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf
+        with:
+          images: ${{ steps.registry_builder.outputs.image_name }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,prefix=dev-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        # Pinned version: build-push-action
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.tags.outputs.tags || steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -39,6 +39,21 @@ RUN \
   && install "linux-${TARGETARCH}/helm" /usr/local/bin \
   && rm -rf helm.tar.gz "linux-${TARGETARCH}"
 
+# Installation of MongoDB Shell (mongosh)
+ARG MONGOSH_VERSION="2.8.3"
+ARG MONGOSH_AMD64_HASH="3072b3bdbd3181ca74b733bac70e8c2ff13d6444412a96995defaa0f1a427401"
+ARG MONGOSH_ARM64_HASH="4991959658ea0feb79a7cece3085e9baafc55120b7ac778c851a529d7c2e7f1a"
+
+WORKDIR /tmp
+RUN \
+  if [ "${TARGETARCH}" = "amd64" ]; then HASH="${MONGOSH_AMD64_HASH}"; \
+  else HASH="${MONGOSH_ARM64_HASH}"; fi \
+  && curl -L -o mongosh.deb \
+    "https://downloads.mongodb.com/compass/mongodb-mongosh_${MONGOSH_VERSION}_${TARGETARCH}.deb" \
+  && echo "${HASH} mongosh.deb" | sha256sum --check \
+  && dpkg --install mongosh.deb \
+  && rm mongosh.deb
+
 # Runtime configuration
 WORKDIR /home/ubuntu
 USER ubuntu

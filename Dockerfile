@@ -4,7 +4,7 @@ ARG TARGETARCH
 # Installation of "base packages"
 RUN \
 	apt-get update \
-	&& apt-get install -y --no-install-recommends curl ca-certificates gettext \
+	&& apt-get install -y --no-install-recommends curl ca-certificates gettext age s3cmd \
 	&& rm -rf /var/lib/apt-get/lists/* \
 	&& apt-get autoremove -y
 
@@ -54,6 +54,21 @@ RUN \
   && dpkg --install mongosh.deb \
   && rm mongosh.deb
 
+# Installation of MongoDB tools
+ARG MONGOTOOLS_VERSION="100.17.0"
+ARG MONGOTOOLS_AMD64_HASH="cfc40386b5c909509fd4b35a4a1f212aeaedc17a3062703d4b4b0823c2beb1b7"
+ARG MONGOTOOLS_ARM64_HASH="f810131b81c18f6818d36630c67a1e507dd51f9464c6d18169bd9856ddfaf22f"
+
+WORKDIR /tmp
+RUN \
+  if [ "${TARGETARCH}" = "amd64" ]; then HASH="${MONGOTOOLS_AMD64_HASH}"; PKG_ARCH="x86_64"; \
+  else HASH="${MONGOTOOLS_ARM64_HASH}"; PKG_ARCH="arm64"; fi \
+  && curl -L -o mongotools.deb \
+    "https://fastdl.mongodb.org/tools/db/mongodb-database-tools-ubuntu2404-${PKG_ARCH}-${MONGOTOOLS_VERSION}.deb" \
+  && echo "${HASH} mongotools.deb" | sha256sum --check \
+  && dpkg --install mongotools.deb \
+  && rm mongotools.deb
+
 # Runtime configuration
 WORKDIR /home/ubuntu
-USER ubuntu
+USER 1000

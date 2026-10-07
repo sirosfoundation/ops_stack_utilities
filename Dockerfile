@@ -4,7 +4,7 @@ ARG TARGETARCH
 # Installation of "base packages"
 RUN \
 	apt-get update \
-	&& apt-get install -y --no-install-recommends curl ca-certificates gettext age s3cmd \
+	&& apt-get install -y --no-install-recommends curl ca-certificates gettext age s3cmd tcpdump zstd \
 	&& rm -rf /var/lib/apt-get/lists/* \
 	&& apt-get autoremove -y
 
